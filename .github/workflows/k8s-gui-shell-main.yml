@@ -1,19 +1,19 @@
-name: Build and Publish
+name: Build and Publish (GUI)
 "on":
   push:
     paths:
-      - k8s-shell/
+      - k8s-gui-shell/
       - _common/
-      - .github/workflows/k8s-shell*
+      - .github/workflows/k8s-gui-shell*
     branches:
       - main
     tags:
-      - "v*"
+      - "gui-v*"
   pull_request:
     paths:
-      - k8s-shell/
+      - k8s-gui-shell/
       - _common/
-      - .github/workflows/k8s-shell*
+      - .github/workflows/k8s-gui-shell*
     branches:
       - main
   workflow_dispatch: {}
@@ -21,6 +21,13 @@ name: Build and Publish
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  # This lives in the same repo as k8s-shell (github.repository is
+  # yogendra-avgo/k8s-shell for both), so the image name must be set
+  # explicitly here rather than derived from github.repository, or it would
+  # collide with k8s-shell's own ghcr.io image.
+  IMAGE: ghcr.io/${{ github.repository_owner }}/k8s-gui-shell
 
 jobs:
   build:
@@ -35,9 +42,9 @@ jobs:
       - name: Setup Buildx
         uses: docker/setup-buildx-action@v4
       - name: Build (native arch, loaded locally)
-        run: task -d k8s-shell build
+        run: task -d k8s-gui-shell build IMAGE=${{ env.IMAGE }}
       - name: Smoke test bundled tools
-        run: task -d k8s-shell  smoke
+        run: task -d k8s-gui-shell smoke IMAGE=${{ env.IMAGE }}
 
   publish:
     needs: build
@@ -62,30 +69,30 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Publish :latest
-        run: task -d k8s-shell  publish IMAGE=ghcr.io/${{ github.repository }} TAG=latest
+        run: task -d k8s-gui-shell publish IMAGE=${{ env.IMAGE }} TAG=latest
       - name: Publish :sha-<short-sha>
-        run: task -d k8s-shell  publish IMAGE=ghcr.io/${{ github.repository }} TAG=sha-${{ github.sha }}
+        run: task -d k8s-gui-shell publish IMAGE=${{ env.IMAGE }} TAG=sha-${{ github.sha }}
       - name: Publish :<date-tag>
-        run: task -d k8s-shell  publish IMAGE=ghcr.io/${{ github.repository }} TAG=$(date -u +%Y%m%d-%H%M)
+        run: task -d k8s-gui-shell publish IMAGE=${{ env.IMAGE }} TAG=$(date -u +%Y%m%d-%H%M)
       - name: Get published digest
         if: github.ref == 'refs/heads/main'
         id: digest
         run: |
-          digest=$(docker buildx imagetools inspect ghcr.io/${{ github.repository }}:latest --format '{{.Manifest.Digest}}')
+          digest=$(docker buildx imagetools inspect ${{ env.IMAGE }}:latest --format '{{.Manifest.Digest}}')
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
       - name: Update deployment.yaml with published image digest
         if: github.ref == 'refs/heads/main'
         run: |
-          sed -i -E "s#(ghcr\.io/${{ github.repository }}:latest)(@sha256:[a-f0-9]+)?#\1@${{ steps.digest.outputs.digest }}#g" k8s-shell/k8s/deployment.yaml
+          sed -i -E "s#(${{ env.IMAGE }}:latest)(@sha256:[a-f0-9]+)?#\1@${{ steps.digest.outputs.digest }}#g" k8s-gui-shell/k8s/deployment.yaml
       - name: Commit and push updated deployment.yaml
         if: github.ref == 'refs/heads/main'
         run: |
-          if git diff --quiet -- k8s-shell/k8s/deployment.yaml; then
+          if git diff --quiet -- k8s-gui-shell/k8s/deployment.yaml; then
             echo "deployment.yaml already up to date"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add k8s-shell/k8s/deployment.yaml
-          git commit -m "chore: update k8s-shell image digest to ${{ steps.digest.outputs.digest }} [skip ci]"
+          git add k8s-gui-shell/k8s/deployment.yaml
+          git commit -m "chore: update k8s-gui-shell image digest to ${{ steps.digest.outputs.digest }} [skip ci]"
           git push
